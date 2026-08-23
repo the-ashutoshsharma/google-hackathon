@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import twilio from 'twilio';
 import { processNewReport } from '@/lib/routing';
 
 export async function POST(req: NextRequest) {
@@ -42,17 +43,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (!from || !body.trim()) {
-      const emptyReplyTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>Civic Action System: Please reply with details or a photo of the civic issue.</Message></Response>`;
-      return new NextResponse(emptyReplyTwiml, {
+      const twiml = new twilio.twiml.MessagingResponse();
+      twiml.message('Civic Action System: Please reply with details or a photo of the civic issue.');
+      return new NextResponse(twiml.toString(), {
         status: 200,
-        headers: {
-          'Content-Type': 'text/xml',
-          'Cache-Control': 'no-store, max-age=0',
-        },
+        headers: { 'Content-Type': 'text/xml' },
       });
     }
 
-    // Process the civic report via the intelligent deterministic pipeline
+    // Process the civic report via the intelligent deterministic pipeline (Gemini 2.5 Flash + Supabase)
     const locationData = lat && lng ? { lat, lng, address } : address ? { address } : undefined;
     const result = await processNewReport(from, body.trim(), locationData, mediaUrl);
 
@@ -60,26 +59,22 @@ export async function POST(req: NextRequest) {
 
     const cleanReplyText = `✅ Received! AI categorized this as ${incident.category}. Dispatched to ${incident.responsible_entity}. SLA: ${incident.sla_hours}h.`;
 
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${cleanReplyText}</Message></Response>`;
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message(cleanReplyText);
 
-    return new NextResponse(twiml, {
+    return new NextResponse(twiml.toString(), {
       status: 200,
-      headers: {
-        'Content-Type': 'text/xml',
-        'Cache-Control': 'no-store, max-age=0',
-      },
+      headers: { 'Content-Type': 'text/xml' },
     });
   } catch (error: unknown) {
     console.error('Error processing Twilio webhook:', error);
 
-    const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>Civic Action System: We received your report and our systems team has logged it.</Message></Response>`;
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message('Civic Action System: We received your report and our systems team has logged it.');
 
-    return new NextResponse(errorTwiml, {
+    return new NextResponse(twiml.toString(), {
       status: 200,
-      headers: {
-        'Content-Type': 'text/xml',
-        'Cache-Control': 'no-store, max-age=0',
-      },
+      headers: { 'Content-Type': 'text/xml' },
     });
   }
 }
