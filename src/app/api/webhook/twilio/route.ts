@@ -1,29 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processNewReport } from '@/lib/routing';
 
-/**
- * Escapes XML special characters to guarantee valid TwiML payload
- */
-function escapeXml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/**
- * Generates standard synchronous TwiML XML response string
- */
-function buildTwiMLResponse(message: string): string {
-  const sanitized = escapeXml(message);
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>${sanitized}</Message>
-</Response>`;
-}
-
 export async function POST(req: NextRequest) {
   try {
     let from = '';
@@ -65,64 +42,44 @@ export async function POST(req: NextRequest) {
     }
 
     if (!from || !body.trim()) {
-      return new NextResponse(
-        buildTwiMLResponse(
-          'Civic Action System: We received an empty report. Please reply with details or a photo of the civic issue.'
-        ),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'text/xml; charset=utf-8' },
-        }
-      );
+      const emptyReplyTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>Civic Action System: Please reply with details or a photo of the civic issue.</Message></Response>`;
+      return new NextResponse(emptyReplyTwiml, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml',
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
     }
 
-    // Process the civic report via the intelligent deterministic pipeline (Gemini 2.5 Flash + Supabase)
+    // Process the civic report via the intelligent deterministic pipeline
     const locationData = lat && lng ? { lat, lng, address } : address ? { address } : undefined;
     const result = await processNewReport(from, body.trim(), locationData, mediaUrl);
 
-    const { incident, isNewIncident } = result;
+    const { incident } = result;
 
-    // Build the citizen response message
-    let replyText = '';
-    if (isNewIncident) {
-      replyText =
-        `🏛️ [Civic Action & Resolution System]\n\n` +
-        `Thank you for reporting. Your issue has been registered.\n\n` +
-        `• Reference ID: #${incident.id.slice(-6).toUpperCase()}\n` +
-        `• Category: ${incident.category.toUpperCase()} (${incident.problem_type})\n` +
-        `• Assigned Entity: ${incident.responsible_entity}\n` +
-        `• Expected Resolution SLA: ${incident.sla_hours} hours\n` +
-        `• Priority: ${incident.severity.toUpperCase()}\n` +
-        `• Action Mode: ${incident.workflow_route}\n\n` +
-        `Summary: "${incident.description}"\n\n` +
-        `Our field operations team has been notified. You will receive updates as the status changes.`;
-    } else {
-      replyText =
-        `🏛️ [Civic Action & Resolution System]\n\n` +
-        `Thank you. An active report for this issue is already in progress.\n\n` +
-        `• Incident ID: #${incident.id.slice(-6).toUpperCase()}\n` +
-        `• Category: ${incident.category.toUpperCase()}\n` +
-        `• Total Citizen Reports: ${incident.report_count}\n` +
-        `• Assigned Entity: ${incident.responsible_entity}\n` +
-        `• SLA Target: ${incident.sla_hours} hours\n` +
-        `• Status: ${incident.status}\n\n` +
-        `Your submission has boosted the incident priority score.`;
-    }
+    const cleanReplyText = `✅ Received! AI categorized this as ${incident.category}. Dispatched to ${incident.responsible_entity}. SLA: ${incident.sla_hours}h.`;
 
-    // Return synchronous TwiML XML response (No ContentSid/Template requirement)
-    return new NextResponse(buildTwiMLResponse(replyText), {
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${cleanReplyText}</Message></Response>`;
+
+    return new NextResponse(twiml, {
       status: 200,
-      headers: { 'Content-Type': 'text/xml; charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/xml',
+        'Cache-Control': 'no-store, max-age=0',
+      },
     });
   } catch (error: unknown) {
     console.error('Error processing Twilio webhook:', error);
 
-    const errorReply =
-      '🏛️ [Civic Action System] We received your message, but encountered an error processing the report. Our systems team has logged the error.';
+    const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>Civic Action System: We received your report and our systems team has logged it.</Message></Response>`;
 
-    return new NextResponse(buildTwiMLResponse(errorReply), {
+    return new NextResponse(errorTwiml, {
       status: 200,
-      headers: { 'Content-Type': 'text/xml; charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/xml',
+        'Cache-Control': 'no-store, max-age=0',
+      },
     });
   }
 }
