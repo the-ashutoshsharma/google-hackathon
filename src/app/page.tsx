@@ -28,11 +28,31 @@ import {
   Briefcase,
   ShieldCheck,
   FileCheck,
+  ChevronRight,
+  Menu,
+  X,
+  Radio,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from '@/components/ui/sheet';
 import {
   Dialog,
   DialogContent,
@@ -115,12 +135,13 @@ export default function CommandCenter() {
   });
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
-  const [activeTab, setActiveTab] = useState<'FIX' | 'RELIEF' | 'PLAN'>('FIX');
+  const [activePath, setActivePath] = useState<'FIX' | 'RELIEF' | 'PLAN'>('FIX');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<CivicIncident | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Simulator Dialog state
   const [simulatorOpen, setSimulatorOpen] = useState(false);
@@ -130,7 +151,7 @@ export default function CommandCenter() {
   const [simLoading, setSimLoading] = useState(false);
   const [simResponse, setSimResponse] = useState<SimulateResultPayload | null>(null);
 
-  // Demo templates
+  // Demo simulation templates
   const demoTemplates = [
     {
       title: 'Pothole on Main Road (FIX)',
@@ -149,7 +170,7 @@ export default function CommandCenter() {
     },
   ];
 
-  // Fetch incidents
+  // Fetch incidents from API
   const fetchIncidents = useCallback(async (preferredId?: string) => {
     try {
       setLoading(true);
@@ -159,15 +180,14 @@ export default function CommandCenter() {
         setIncidents(data.incidents);
         setMetrics(data.metrics);
 
-        // Auto-select incident if not selected or if preferredId provided
+        // Update selected incident reference if open in Sheet
         if (preferredId) {
-          setSelectedIncidentId(preferredId);
-        } else if (data.incidents.length > 0) {
-          setSelectedIncidentId((prev) => {
-            if (prev && data.incidents.some((i: CivicIncident) => i.id === prev)) {
-              return prev;
-            }
-            return data.incidents[0].id;
+          const updated = data.incidents.find((i: CivicIncident) => i.id === preferredId);
+          if (updated) setSelectedIncident(updated);
+        } else {
+          setSelectedIncident((prev) => {
+            if (!prev) return null;
+            return data.incidents.find((i: CivicIncident) => i.id === prev.id) || null;
           });
         }
       }
@@ -187,7 +207,7 @@ export default function CommandCenter() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Seed database
+  // Seed demo dataset
   const handleSeed = async () => {
     try {
       setSeeding(true);
@@ -204,7 +224,7 @@ export default function CommandCenter() {
     }
   };
 
-  // Handle workflow actions
+  // Handle workflow actions (complete work, verify citizen, plan agenda)
   const handleIncidentAction = async (incidentId: string, action: string, payload: Record<string, unknown> = {}) => {
     try {
       setActionLoading(true);
@@ -217,6 +237,7 @@ export default function CommandCenter() {
       if (data.success) {
         showToast(data.message || 'Action executed successfully.');
         await fetchIncidents(incidentId);
+        setSelectedIncident(data.incident);
       } else {
         alert(data.error || 'Action failed');
       }
@@ -246,6 +267,7 @@ export default function CommandCenter() {
         setSimResponse(data);
         showToast(' Citizen signal processed & classified via Gemini 2.5 Flash!');
         await fetchIncidents(data.result.incident.id);
+        setSelectedIncident(data.result.incident);
       } else {
         alert(data.error || 'Simulation failed');
       }
@@ -256,35 +278,27 @@ export default function CommandCenter() {
     }
   };
 
-  // Filtered incidents for current active tab
-  const tabIncidents = useMemo(() => {
+  // Counts for each path
+  const fixCount = useMemo(() => incidents.filter((i) => i.workflow_route === 'FIX').length, [incidents]);
+  const reliefCount = useMemo(() => incidents.filter((i) => i.workflow_route === 'RELIEF').length, [incidents]);
+  const planCount = useMemo(() => incidents.filter((i) => i.workflow_route === 'PLAN').length, [incidents]);
+
+  // Filtered incidents for the active path
+  const activePathIncidents = useMemo(() => {
     return incidents.filter(
       (inc) =>
-        inc.workflow_route === activeTab &&
+        inc.workflow_route === activePath &&
         (statusFilter === 'ALL' || inc.status === statusFilter) &&
         (!searchQuery ||
           inc.problem_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
           inc.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
           (inc.address && inc.address.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          inc.responsible_entity.toLowerCase().includes(searchQuery.toLowerCase()) ||
           inc.id.toLowerCase().includes(searchQuery.toLowerCase()))
     );
-  }, [incidents, activeTab, statusFilter, searchQuery]);
+  }, [incidents, activePath, statusFilter, searchQuery]);
 
-  // Counts for each tab
-  const fixCount = useMemo(() => incidents.filter((i) => i.workflow_route === 'FIX').length, [incidents]);
-  const reliefCount = useMemo(() => incidents.filter((i) => i.workflow_route === 'RELIEF').length, [incidents]);
-  const planCount = useMemo(() => incidents.filter((i) => i.workflow_route === 'PLAN').length, [incidents]);
-
-  // Selected incident object
-  const selectedIncident = useMemo(() => {
-    if (selectedIncidentId) {
-      const found = incidents.find((i) => i.id === selectedIncidentId);
-      if (found) return found;
-    }
-    return tabIncidents[0] || incidents[0] || null;
-  }, [incidents, selectedIncidentId, tabIncidents]);
-
-  // Helper formatting ID display (e.g. #T-G201, #VNKM1)
+  // ID Formatter (e.g. #T-G201, #VNKM1)
   const formatIncidentId = (id: string) => {
     if (id.startsWith('incident-')) {
       return `#T-${id.replace('incident-', '').toUpperCase()}`;
@@ -295,7 +309,7 @@ export default function CommandCenter() {
     return `#${id.toUpperCase()}`;
   };
 
-  // SLA Countdown Helper
+  // Dynamic SLA Countdown Badge Helper
   const getSLABadge = (createdAt: string, slaHours: number, status: string) => {
     if (status === 'RESOLVED') {
       return (
@@ -332,6 +346,19 @@ export default function CommandCenter() {
     }
   };
 
+  const getSeverityBadge = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+        return <Badge className="bg-rose-600 text-white font-bold text-[10px] uppercase">Critical</Badge>;
+      case 'high':
+        return <Badge className="bg-amber-600 text-white text-[10px] uppercase">High</Badge>;
+      case 'medium':
+        return <Badge className="bg-blue-600 text-white text-[10px] uppercase">Medium</Badge>;
+      default:
+        return <Badge className="bg-zinc-700 text-zinc-300 text-[10px] uppercase">Low</Badge>;
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'OPEN':
@@ -348,7 +375,7 @@ export default function CommandCenter() {
   };
 
   return (
-    <div className="min-h-screen bg-[#070709] text-zinc-100 font-sans antialiased p-4 sm:p-6 lg:p-8 space-y-5 selection:bg-zinc-800 selection:text-white">
+    <div className="min-h-screen bg-[#070709] text-zinc-100 flex flex-col md:flex-row antialiased selection:bg-zinc-800 selection:text-white">
       {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="fixed top-5 right-5 z-50 bg-[#121215] border border-emerald-500/40 text-emerald-300 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top duration-300">
@@ -357,469 +384,324 @@ export default function CommandCenter() {
         </div>
       )}
 
-      {/* TOP BAR CONTAINER */}
-      <header className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        {/* Left branding */}
-        <div className="flex items-center gap-3.5">
-          <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-200 shrink-0 shadow-inner">
-            <Building2 className="w-5 h-5" />
+      {/* MOBILE TOP BAR (Hidden on Desktop) */}
+      <div className="md:hidden flex items-center justify-between p-4 bg-[#0e0e12] border-b border-[#1e1e24] sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-200">
+            <Building2 className="w-4 h-4" />
           </div>
           <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="font-bold text-base text-white tracking-tight">
-                Civic Action &amp; Resolution Platform
-              </h1>
-              <span className="px-2 py-0.5 rounded-md bg-[#18181f] border border-[#27272f] text-[10px] font-medium text-zinc-400">
-                Municipal Ops v2.4
+            <h1 className="font-bold text-sm text-white">Civic Action Platform</h1>
+            <p className="text-[10px] text-zinc-400">Municipal Ops v2.4</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+          className="p-2 rounded-lg bg-[#141419] border border-[#27272e] text-zinc-300"
+        >
+          {mobileSidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* LEFT SIDEBAR (Fixed w-64 on Desktop, Dark Theme) */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 bg-[#0e0e12] border-r border-[#1e1e24] flex flex-col justify-between p-4 transition-transform duration-200 ease-in-out md:static md:translate-x-0 ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="space-y-6">
+          {/* Sidebar Header */}
+          <div className="flex items-center gap-3 pb-4 border-b border-[#1e1e24]">
+            <div className="h-10 w-10 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-200 shadow-inner shrink-0">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-bold text-sm text-white tracking-tight">Civic Action</h2>
+                <span className="px-1.5 py-0.5 rounded bg-[#18181f] border border-[#27272f] text-[9px] font-mono text-zinc-400">
+                  v2.4
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-400">Command Center</p>
+            </div>
+          </div>
+
+          {/* Navigation Section: The 3 Core Paths */}
+          <div className="space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 px-2 block">
+              MUNICIPAL PATHWAYS
+            </span>
+
+            {/* Path A: Operational Fixes */}
+            <button
+              onClick={() => {
+                setActivePath('FIX');
+                setMobileSidebarOpen(false);
+              }}
+              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-medium border transition-all ${
+                activePath === 'FIX'
+                  ? 'bg-[#181822] border-[#383848] text-white shadow-sm'
+                  : 'bg-transparent border-transparent text-zinc-400 hover:bg-[#141419] hover:text-zinc-200'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-lg ${activePath === 'FIX' ? 'bg-indigo-600/30 text-indigo-300' : 'bg-[#141419] text-zinc-400'}`}>
+                  <Wrench className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-left">
+                  <span className="block font-semibold text-xs">PATH A: Fixes</span>
+                  <span className="text-[10px] text-zinc-400 block font-normal">Physical Work Orders</span>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-[#1c1c24] border border-[#2a2a36] text-[10px] font-mono text-zinc-300">
+                {fixCount}
+              </span>
+            </button>
+
+            {/* Path B: Emergency Relief */}
+            <button
+              onClick={() => {
+                setActivePath('RELIEF');
+                setMobileSidebarOpen(false);
+              }}
+              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-medium border transition-all ${
+                activePath === 'RELIEF'
+                  ? 'bg-[#221316] border-[#552528] text-rose-200 shadow-sm'
+                  : 'bg-transparent border-transparent text-zinc-400 hover:bg-[#141419] hover:text-zinc-200'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-lg ${activePath === 'RELIEF' ? 'bg-rose-600/30 text-rose-300' : 'bg-[#141419] text-zinc-400'}`}>
+                  <Flame className="w-3.5 h-3.5 text-rose-400" />
+                </div>
+                <div className="text-left">
+                  <span className="block font-semibold text-xs">PATH B: Relief</span>
+                  <span className="text-[10px] text-zinc-400 block font-normal">Emergency Response</span>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-[#1c1c24] border border-[#2a2a36] text-[10px] font-mono text-rose-300">
+                {reliefCount}
+              </span>
+            </button>
+
+            {/* Path C: Policy & Planning */}
+            <button
+              onClick={() => {
+                setActivePath('PLAN');
+                setMobileSidebarOpen(false);
+              }}
+              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-medium border transition-all ${
+                activePath === 'PLAN'
+                  ? 'bg-[#112217] border-[#204a32] text-emerald-200 shadow-sm'
+                  : 'bg-transparent border-transparent text-zinc-400 hover:bg-[#141419] hover:text-zinc-200'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-lg ${activePath === 'PLAN' ? 'bg-emerald-600/30 text-emerald-300' : 'bg-[#141419] text-zinc-400'}`}>
+                  <Compass className="w-3.5 h-3.5 text-emerald-400" />
+                </div>
+                <div className="text-left">
+                  <span className="block font-semibold text-xs">PATH C: Policy</span>
+                  <span className="text-[10px] text-zinc-400 block font-normal">Strategic Planning</span>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-[#1c1c24] border border-[#2a2a36] text-[10px] font-mono text-emerald-300">
+                {planCount}
+              </span>
+            </button>
+          </div>
+
+          {/* Developer / Operations Actions */}
+          <div className="space-y-2 pt-2 border-t border-[#1e1e24]">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 px-2 block">
+              OPERATIONS &amp; TOOLS
+            </span>
+
+            {/* Live WhatsApp Simulator */}
+            <button
+              onClick={() => {
+                setSimulatorOpen(true);
+                setSimResponse(null);
+                setMobileSidebarOpen(false);
+              }}
+              className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-[#141419] hover:bg-[#1a1a22] border border-[#27272e] text-xs font-medium text-zinc-200 transition-colors shadow-sm"
+            >
+              <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>WhatsApp Simulator</span>
+            </button>
+
+            {/* Seed Demo Data */}
+            <button
+              onClick={() => {
+                handleSeed();
+                setMobileSidebarOpen(false);
+              }}
+              disabled={seeding}
+              className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-[#141419] hover:bg-[#1a1a22] border border-[#27272e] text-xs font-medium text-zinc-200 transition-colors"
+            >
+              <Database className={`w-4 h-4 ${seeding ? 'animate-spin text-indigo-400' : 'text-zinc-400'} shrink-0`} />
+              <span>{seeding ? 'Seeding...' : 'Seed Demo Data'}</span>
+            </button>
+
+            {/* Refresh System Data */}
+            <button
+              onClick={() => {
+                fetchIncidents();
+                setMobileSidebarOpen(false);
+              }}
+              disabled={loading}
+              className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-[#141419] hover:bg-[#1a1a22] border border-[#27272e] text-xs font-medium text-zinc-200 transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-sky-400' : 'text-zinc-400'} shrink-0`} />
+              <span>Refresh Incidents</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Sidebar Footer: Jurisdiction Switcher */}
+        <div className="pt-4 border-t border-[#1e1e24] space-y-2">
+          <div className="p-3 rounded-xl bg-[#141419] border border-[#27272e] text-xs space-y-1">
+            <div className="flex items-center justify-between text-zinc-400 text-[10px]">
+              <span className="font-semibold uppercase tracking-wider">Active Jurisdiction</span>
+              <span className="flex items-center gap-1 text-emerald-400 font-mono">
+                <Radio className="w-3 h-3 animate-pulse" /> Live
               </span>
             </div>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Closed-Loop Triage &bull; Deterministic Routing &bull; Citizen Verification
+            <div className="flex items-center gap-1.5 text-zinc-200 font-medium text-xs pt-0.5">
+              <MapPin className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <span className="truncate">Sector 4 — Demo Constituency</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA (Flex-1, Scrollable, Spacious) */}
+      <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 space-y-6 overflow-y-auto max-w-[1600px] mx-auto">
+        {/* TOP ROW: 4 HORIZONTAL KPI CARDS */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {/* Card 1: Citizen Signals */}
+          <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
+                  CITIZEN SIGNALS RECEIVED
+                </span>
+                <div className="text-2xl font-bold text-white mt-0.5 flex items-baseline gap-1.5">
+                  {metrics.totalSignals} <span className="text-xs font-normal text-zinc-400">reports</span>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-400 mt-4">
+              {metrics.totalIncidents} deduplicated incidents across constituency
             </p>
           </div>
-        </div>
 
-        {/* Right Actions */}
-        <div className="flex items-center flex-wrap gap-2.5">
-          {/* Jurisdiction Pill */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#141419] border border-[#27272e] text-xs text-zinc-300">
-            <MapPin className="w-3.5 h-3.5 text-zinc-400" />
-            <span className="font-medium">Sector 4 — Demo Constituency</span>
-          </div>
-
-          {/* Seed Demo Data Button */}
-          <button
-            onClick={handleSeed}
-            disabled={seeding}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#141419] hover:bg-[#1a1a22] border border-[#27272e] text-xs font-medium text-zinc-200 transition-colors"
-          >
-            <Database className={`w-3.5 h-3.5 ${seeding ? 'animate-spin text-indigo-400' : 'text-zinc-400'}`} />
-            <span>{seeding ? 'Seeding...' : 'Seed Demo Data'}</span>
-          </button>
-
-          {/* Live WhatsApp Simulator Button */}
-          <button
-            onClick={() => {
-              setSimulatorOpen(true);
-              setSimResponse(null);
-            }}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#141419] hover:bg-[#1a1a22] border border-[#27272e] text-xs font-medium text-zinc-200 transition-colors shadow-sm"
-          >
-            <Phone className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Live WhatsApp Simulator</span>
-          </button>
-
-          {/* Refresh Button */}
-          <button
-            onClick={() => fetchIncidents(selectedIncidentId || undefined)}
-            disabled={loading}
-            className="h-9 w-9 rounded-xl bg-[#141419] hover:bg-[#1a1a22] border border-[#27272e] flex items-center justify-center text-zinc-400 hover:text-zinc-200 transition-colors"
-            title="Refresh Data"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </header>
-
-      {/* 4 QUICK METRIC CARDS ROW */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Citizen Signals */}
-        <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between">
-          <div className="flex items-start gap-4">
-            <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
-                CITIZEN SIGNALS RECEIVED
-              </span>
-              <div className="text-2xl font-bold text-white mt-0.5 flex items-baseline gap-1.5">
-                {metrics.totalSignals} <span className="text-xs font-normal text-zinc-400">reports</span>
+          {/* Card 2: Active Work Orders */}
+          <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
+                <Briefcase className="w-5 h-5" />
               </div>
-            </div>
-          </div>
-          <p className="text-xs text-zinc-400 mt-4">
-            {metrics.totalIncidents} deduplicated incidents across constituency
-          </p>
-        </div>
-
-        {/* Card 2: Active Work Orders */}
-        <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between">
-          <div className="flex items-start gap-4">
-            <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
-              <Briefcase className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
-                ACTIVE WORK ORDERS
-              </span>
-              <div className="text-2xl font-bold text-white mt-0.5 flex items-baseline gap-1.5">
-                {metrics.activeWorkOrders} <span className="text-xs font-normal text-zinc-400">field tasks</span>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-zinc-400 mt-4">
-            Dispatched to municipal departments with SLA trackers
-          </p>
-        </div>
-
-        {/* Card 3: Urgent Relief */}
-        <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between">
-          <div className="flex items-start gap-4">
-            <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
-                URGENT RELIEF DISPATCHED
-              </span>
-              <div className="text-2xl font-bold text-white mt-0.5 flex items-baseline gap-1.5">
-                {metrics.urgentReliefCount} <span className="text-xs font-normal text-zinc-400">critical</span>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-zinc-400 mt-4">
-            Water tankers &amp; emergency hazard response teams
-          </p>
-        </div>
-
-        {/* Card 4: SLA Adherence */}
-        <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between">
-          <div className="flex items-start gap-4">
-            <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
-                AVG SLA ADHERENCE
-              </span>
-              <div className="text-2xl font-bold text-white mt-0.5">
-                {metrics.slaAdherenceRate}%
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-zinc-400 mt-4">
-            Closed-loop resolution verified by citizen confirmation
-          </p>
-        </div>
-      </section>
-
-      {/* MAIN TWO-COLUMN WORKFLOW GRID */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* LEFT COLUMN: ACTIVE WORKFLOW & INCIDENT CONSOLE (7 Cols) */}
-        <div className="lg:col-span-7 rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between min-h-[580px] space-y-6">
-          {/* Main Content Area: Active Incident Details & Workflow */}
-          <div className="space-y-5">
-            {selectedIncident ? (
-              <>
-                {/* Active Incident Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-[#1e1e24]">
-                  <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="font-mono text-sm font-bold text-indigo-400">
-                        {formatIncidentId(selectedIncident.id)}
-                      </span>
-                      <span className="px-2.5 py-0.5 rounded-md bg-[#181820] border border-[#272733] text-xs capitalize text-zinc-300">
-                        {selectedIncident.category}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md bg-[#181820] border border-[#272733] text-xs font-mono text-zinc-400">
-                        {selectedIncident.problem_type.replace(/_/g, ' ')}
-                      </span>
-                      {getStatusBadge(selectedIncident.status)}
-                    </div>
-                    <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-zinc-500" />
-                      {selectedIncident.address || 'Address registered'} &bull; Assigned: <strong className="text-zinc-200">{selectedIncident.responsible_entity}</strong>
-                    </p>
-                  </div>
-
-                  <div>
-                    {getSLABadge(selectedIncident.created_at, selectedIncident.sla_hours, selectedIncident.status)}
-                  </div>
-                </div>
-
-                {/* 5-Step Closed-Loop Lifecycle Progress Tracker */}
-                <div className="p-4 rounded-xl bg-[#121217] border border-[#1e1e24] space-y-2.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      Closed-Loop Lifecycle Progress
-                    </span>
-                    <span className="text-[10px] text-zinc-400 font-mono">
-                      {selectedIncident.report_count} Citizen Signal{selectedIncident.report_count > 1 ? 's' : ''}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-5 gap-2 text-center text-xs">
-                    {/* Step 1: Reported */}
-                    <div className="p-2.5 rounded-lg bg-[#181820] border border-[#272733] text-zinc-200">
-                      <CheckCircle2 className="w-4 h-4 mx-auto mb-1 text-blue-400" />
-                      <p className="font-bold text-[11px]">1. Reported</p>
-                      <p className="text-[10px] text-zinc-400">WhatsApp / SMS</p>
-                    </div>
-
-                    {/* Step 2: AI Triage */}
-                    <div className="p-2.5 rounded-lg bg-[#181820] border border-[#272733] text-zinc-200">
-                      <Sparkles className="w-4 h-4 mx-auto mb-1 text-purple-400" />
-                      <p className="font-bold text-[11px]">2. AI Triage</p>
-                      <p className="text-[10px] text-zinc-400">Gemini 2.5</p>
-                    </div>
-
-                    {/* Step 3: Dispatched */}
-                    <div className="p-2.5 rounded-lg bg-[#181820] border border-[#272733] text-zinc-200">
-                      <Briefcase className="w-4 h-4 mx-auto mb-1 text-amber-400" />
-                      <p className="font-bold text-[11px]">3. Dispatched</p>
-                      <p className="text-[10px] text-zinc-400">{selectedIncident.sla_hours}h SLA</p>
-                    </div>
-
-                    {/* Step 4: Completed */}
-                    <div className={`p-2.5 rounded-lg border ${selectedIncident.work_orders.some((w) => w.status === 'COMPLETED') ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-[#181820] border-[#272733] text-zinc-400'}`}>
-                      <FileCheck className="w-4 h-4 mx-auto mb-1" />
-                      <p className="font-bold text-[11px]">4. Completed</p>
-                      <p className="text-[10px]">{selectedIncident.work_orders.some((w) => w.status === 'COMPLETED') ? 'Evidence Uploaded' : 'In Progress'}</p>
-                    </div>
-
-                    {/* Step 5: Verified */}
-                    <div className={`p-2.5 rounded-lg border ${selectedIncident.status === 'RESOLVED' ? 'bg-emerald-950/70 border-emerald-600 text-emerald-300' : selectedIncident.status === 'REOPENED' ? 'bg-rose-950/70 border-rose-600 text-rose-300' : 'bg-[#181820] border-[#272733] text-zinc-400'}`}>
-                      <RotateCcw className="w-4 h-4 mx-auto mb-1" />
-                      <p className="font-bold text-[11px]">5. Verified</p>
-                      <p className="text-[10px]">{selectedIncident.status === 'RESOLVED' ? 'Citizen Verified' : selectedIncident.status === 'REOPENED' ? 'Escalated' : 'Awaiting Reply'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Summary & Dual Tracks */}
-                {selectedIncident.workflow_route === 'RELIEF' ? (
-                  /* RELIEF DUAL TRACKS */
-                  <div className="space-y-3">
-                    <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-800/50 space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-                          Track 1: Immediate Emergency Relief
-                        </span>
-                        <Badge variant="outline" className="text-[10px] border-rose-700 text-rose-300">
-                          Dispatched
-                        </Badge>
-                      </div>
-                      <p className="text-xs font-semibold text-rose-100">
-                        2x 5000L Emergency Water Tankers Dispatched &bull; Water Distribution Point Activated
-                      </p>
-                      <p className="text-[11px] text-rose-300/80">
-                        Assigned: Emergency Water Fleet Unit (ETA 45 mins)
-                      </p>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-[#141419] border border-[#272733] space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
-                          Track 2: Permanent Engineering Repair
-                        </span>
-                        <Badge variant="outline" className="text-[10px] border-zinc-700 text-zinc-300">
-                          Task WO-881
-                        </Badge>
-                      </div>
-                      <p className="text-xs font-medium text-zinc-200">
-                        Mainline 300mm Valve Excavation &amp; Pipe Replacement Task Active
-                      </p>
-                      <p className="text-[11px] text-zinc-400">
-                        Target Resolution SLA: 12 Hours
-                      </p>
-                    </div>
-                  </div>
-                ) : selectedIncident.workflow_route === 'PLAN' ? (
-                  /* PLAN PROPOSAL JUSTIFICATION */
-                  <div className="p-4 rounded-xl bg-[#141419] border border-emerald-900/40 space-y-2">
-                    <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Compass className="w-3.5 h-3.5 text-emerald-400" />
-                      AI Strategic Policymaker Proposal
-                    </span>
-                    <p className="text-xs text-zinc-200 leading-relaxed">
-                      {selectedIncident.description}
-                    </p>
-                    <div className="pt-2 flex justify-end">
-                      <Button
-                        size="sm"
-                        onClick={() => handleIncidentAction(selectedIncident.id, 'plan_agenda')}
-                        disabled={actionLoading}
-                        className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs h-8 gap-1.5"
-                      >
-                        <Check className="w-3.5 h-3.5" /> Add to Master Plan Agenda
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  /* FIX SUMMARY & EVIDENCE */
-                  <div className="space-y-4">
-                    <div className="p-3.5 rounded-xl bg-[#141419] border border-[#272733] text-xs text-zinc-300 leading-relaxed">
-                      <span className="font-semibold text-zinc-400 block mb-1">Operational Description:</span>
-                      {selectedIncident.description}
-                    </div>
-
-                    {/* Before & After Visual Evidence View */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Before Photo */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-rose-400 font-semibold flex items-center gap-1 text-[11px]">
-                            <AlertTriangle className="w-3 h-3" /> Citizen Report Photo
-                          </span>
-                          <span className="text-zinc-500 font-mono text-[10px]">BEFORE</span>
-                        </div>
-                        <div className="aspect-video w-full rounded-xl overflow-hidden border border-[#272733] bg-[#09090c] relative">
-                          {selectedIncident.reports[0]?.image_url ? (
-                            <img
-                              src={selectedIncident.reports[0].image_url}
-                              alt="Before report evidence"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex items-center justify-center h-full text-zinc-600 text-xs">
-                              No initial photo attached
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* After Photo */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
-                            <CheckCircle2 className="w-3 h-3" /> Field Completion Proof
-                          </span>
-                          <span className="text-zinc-500 font-mono text-[10px]">AFTER</span>
-                        </div>
-                        <div className="aspect-video w-full rounded-xl overflow-hidden border border-[#272733] bg-[#09090c] relative">
-                          {selectedIncident.work_orders.find((w) => w.evidence_image_url)?.evidence_image_url ? (
-                            <img
-                              src={selectedIncident.work_orders.find((w) => w.evidence_image_url)!.evidence_image_url!}
-                              alt="After repair evidence"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-xs p-3 text-center">
-                              <span className="font-semibold text-zinc-400">Work in Progress</span>
-                              <span className="text-[10px] text-zinc-600 mt-0.5">Crew has not uploaded proof photo</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Workflow Simulation Triggers */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  {/* Worker Action Button */}
-                  <div className="p-3.5 rounded-xl bg-[#141419] border border-[#272733] space-y-2">
-                    <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <Wrench className="w-3.5 h-3.5 text-indigo-400" />
-                      Field Worker Portal
-                    </span>
-                    <Button
-                      onClick={() => handleIncidentAction(selectedIncident.id, 'complete_work')}
-                      disabled={actionLoading}
-                      className="w-full bg-[#22222b] hover:bg-[#2b2b36] border border-[#333342] text-zinc-100 text-xs font-semibold h-8 gap-1.5"
-                    >
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      Upload Completion Evidence &amp; Mark Done
-                    </Button>
-                  </div>
-
-                  {/* Citizen Verification Buttons */}
-                  <div className="p-3.5 rounded-xl bg-[#141419] border border-[#272733] space-y-2">
-                    <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5" />
-                      Citizen WhatsApp Confirmation
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={() => handleIncidentAction(selectedIncident.id, 'verify_citizen', { response: 'YES' })}
-                        disabled={actionLoading}
-                        className="flex-1 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-300 text-xs font-semibold h-8 gap-1"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Reply YES
-                      </Button>
-
-                      <Button
-                        onClick={() => handleIncidentAction(selectedIncident.id, 'verify_citizen', { response: 'NO' })}
-                        disabled={actionLoading}
-                        className="flex-1 bg-rose-950/70 hover:bg-rose-900 border border-rose-700/80 text-rose-300 text-xs font-semibold h-8 gap-1"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        Reply NO
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-20 text-zinc-500 text-sm">
-                Select an incident from the right panel to view closed-loop progression.
-              </div>
-            )}
-          </div>
-
-          {/* BOTTOM PATH SELECTOR TABS & SEARCH/FILTER */}
-          <div className="space-y-3.5 pt-4 border-t border-[#1e1e24]">
-            {/* PATH TABS ROW */}
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {/* PATH A */}
-              <button
-                onClick={() => setActiveTab('FIX')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium border transition-colors ${activeTab === 'FIX' ? 'bg-[#1e1e26] border-[#383848] text-white shadow-sm' : 'bg-[#121216] border-[#22222a] text-zinc-400 hover:text-zinc-200'}`}
-              >
-                <Wrench className="w-3.5 h-3.5 text-zinc-300" />
-                <span>PATH A: Operational Fixes</span>
-                <span className="px-2 py-0.5 rounded-md bg-[#1c1c24] border border-[#2a2a36] text-[10px] text-zinc-300 font-mono">
-                  {fixCount}
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
+                  ACTIVE WORK ORDERS
                 </span>
-              </button>
+                <div className="text-2xl font-bold text-white mt-0.5 flex items-baseline gap-1.5">
+                  {metrics.activeWorkOrders} <span className="text-xs font-normal text-zinc-400">field tasks</span>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-400 mt-4">
+              Dispatched to municipal departments with SLA trackers
+            </p>
+          </div>
 
-              {/* PATH B */}
-              <button
-                onClick={() => setActiveTab('RELIEF')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium border transition-colors ${activeTab === 'RELIEF' ? 'bg-[#261517] border-[#552528] text-rose-200 shadow-sm' : 'bg-[#121216] border-[#22222a] text-zinc-400 hover:text-zinc-200'}`}
-              >
-                <Flame className="w-3.5 h-3.5 text-rose-400" />
-                <span>PATH B: Emergency Relief</span>
-                <span className="px-2 py-0.5 rounded-md bg-[#1c1c24] border border-[#2a2a36] text-[10px] text-zinc-300 font-mono">
-                  {reliefCount}
+          {/* Card 3: Urgent Relief */}
+          <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
+                <AlertCircle className="w-5 h-5 text-rose-400" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
+                  URGENT RELIEF DISPATCHED
                 </span>
-              </button>
+                <div className="text-2xl font-bold text-rose-300 mt-0.5 flex items-baseline gap-1.5">
+                  {metrics.urgentReliefCount} <span className="text-xs font-normal text-rose-400/80">critical</span>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-400 mt-4">
+              Water tankers &amp; emergency hazard response teams
+            </p>
+          </div>
 
-              {/* PATH C */}
-              <button
-                onClick={() => setActiveTab('PLAN')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium border transition-colors ${activeTab === 'PLAN' ? 'bg-[#13241b] border-[#204a32] text-emerald-200 shadow-sm' : 'bg-[#121216] border-[#22222a] text-zinc-400 hover:text-zinc-200'}`}
-              >
-                <Compass className="w-3.5 h-3.5 text-emerald-400" />
-                <span>PATH C: Policy &amp; Planning</span>
-                <span className="px-2 py-0.5 rounded-md bg-[#1c1c24] border border-[#2a2a36] text-[10px] text-zinc-300 font-mono">
-                  {planCount}
+          {/* Card 4: SLA Adherence */}
+          <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 flex flex-col justify-between shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="h-11 w-11 rounded-xl border border-[#27272e] bg-[#141419] flex items-center justify-center text-zinc-300 shrink-0">
+                <TrendingUp className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
+                  AVG SLA ADHERENCE
                 </span>
-              </button>
+                <div className="text-2xl font-bold text-white mt-0.5">
+                  {metrics.slaAdherenceRate}%
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-400 mt-4">
+              Closed-loop resolution verified by citizen confirmation
+            </p>
+          </div>
+        </section>
+
+        {/* MIDDLE ROW: CONTROLS & HEADER */}
+        <section className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  {activePath === 'FIX' && <Wrench className="w-4 h-4 text-indigo-400" />}
+                  {activePath === 'RELIEF' && <Flame className="w-4 h-4 text-rose-400" />}
+                  {activePath === 'PLAN' && <Compass className="w-4 h-4 text-emerald-400" />}
+                  {activePath === 'FIX' && 'PATH A: Municipal Work Orders & Field Fixes'}
+                  {activePath === 'RELIEF' && 'PATH B: Urgent Emergency & Disruption Relief'}
+                  {activePath === 'PLAN' && 'PATH C: Strategic Policy & Infrastructure Planning'}
+                </h2>
+                <Badge variant="outline" className="text-[10px] bg-[#141419] border-[#272733] text-zinc-300">
+                  {activePathIncidents.length} Incident{activePathIncidents.length !== 1 ? 's' : ''}
+                </Badge>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {activePath === 'FIX' && 'Physical repair tasks assigned deterministically to maintenance crews. Click any row to open the closed-loop detail drawer.'}
+                {activePath === 'RELIEF' && 'High-severity disruptions running parallel immediate relief and permanent engineering repair tracks.'}
+                {activePath === 'PLAN' && 'Aggregated citizen petitions translated into actionable policy agendas for municipal and MPLADS funding.'}
+              </p>
             </div>
 
-            {/* SEARCH & STATUS FILTER ROW */}
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-              <div className="sm:col-span-8 relative">
+            {/* Search & Status Filters */}
+            <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+              <div className="relative w-full sm:w-72">
                 <Search className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                 <input
                   type="text"
-                  placeholder="Filter by problem, street, department..."
+                  placeholder="Filter by problem, street, dept..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-[#121216] border border-[#22222a] rounded-xl text-xs h-10 pl-9 pr-3 text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-[#383848]"
+                  className="w-full bg-[#121216] border border-[#22222a] rounded-xl text-xs h-9 pl-9 pr-3 text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-[#383848]"
                 />
               </div>
 
-              <div className="sm:col-span-4 relative">
+              <div className="relative w-full sm:w-40">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full bg-[#121216] border border-[#22222a] rounded-xl text-xs h-10 px-3 text-zinc-200 focus:outline-none focus:border-[#383848] appearance-none cursor-pointer"
+                  className="w-full bg-[#121216] border border-[#22222a] rounded-xl text-xs h-9 px-3 text-zinc-200 focus:outline-none focus:border-[#383848] appearance-none cursor-pointer"
                 >
                   <option value="ALL">All Statuses</option>
                   <option value="OPEN">OPEN</option>
@@ -831,72 +713,493 @@ export default function CommandCenter() {
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* RIGHT COLUMN: INCIDENT & LOCATION SIDEBAR (5 Cols) */}
-        <div className="lg:col-span-5 rounded-2xl bg-[#0e0e12] border border-[#1e1e24] p-5 space-y-4">
-          {/* Header */}
-          <div>
-            <div className="flex items-center gap-2 text-zinc-100 font-bold text-sm">
-              <Wrench className="w-4 h-4 text-zinc-300" />
-              <span>Municipal Work Orders &amp; Field</span>
-            </div>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Physical repair tasks assigned deterministically to teams
-            </p>
-          </div>
-
-          <div className="pt-2 border-t border-[#1e1e24]">
-            <span className="text-xs font-bold text-zinc-300 block mb-2">
-              Incident &amp; Location
-            </span>
-
-            {/* List of Incidents matching active tab and filter */}
-            <div className="space-y-0 divide-y divide-[#1e1e24] overflow-hidden rounded-xl border border-[#1e1e24] bg-[#0c0c10]">
-              {tabIncidents.length === 0 ? (
-                <div className="py-12 text-center text-zinc-500 text-xs">
-                  No incidents matching filters. Click &ldquo;Seed Demo Data&rdquo; to populate.
-                </div>
-              ) : (
-                tabIncidents.map((inc) => {
-                  const isSelected = selectedIncident?.id === inc.id;
-                  return (
-                    <div
+        {/* MAIN VIEW: FULL WIDTH DATA TABLE / CARD GRID */}
+        {activePath === 'FIX' ? (
+          /* PATH A: FULL-WIDTH TABLE */
+          <div className="rounded-2xl bg-[#0e0e12] border border-[#1e1e24] overflow-hidden shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-b border-[#1e1e24] hover:bg-transparent bg-[#111116]">
+                  <TableHead className="text-zinc-400 text-xs font-bold py-3.5 pl-5">Incident Reference &amp; Location</TableHead>
+                  <TableHead className="text-zinc-400 text-xs font-bold">Category &amp; Problem</TableHead>
+                  <TableHead className="text-zinc-400 text-xs font-bold">Signals</TableHead>
+                  <TableHead className="text-zinc-400 text-xs font-bold">Severity</TableHead>
+                  <TableHead className="text-zinc-400 text-xs font-bold">Assigned Department</TableHead>
+                  <TableHead className="text-zinc-400 text-xs font-bold">SLA Tracker</TableHead>
+                  <TableHead className="text-zinc-400 text-xs font-bold">Status</TableHead>
+                  <TableHead className="text-right text-zinc-400 text-xs font-bold pr-5">Drawer</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activePathIncidents.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-16 text-zinc-500 text-xs">
+                      No operational fix incidents matching your filter. Click &ldquo;Seed Demo Data&rdquo; in the sidebar to populate.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  activePathIncidents.map((inc) => (
+                    <TableRow
                       key={inc.id}
-                      onClick={() => setSelectedIncidentId(inc.id)}
-                      className={`p-4 transition-colors cursor-pointer flex items-center justify-between gap-3 ${isSelected ? 'bg-[#181822]' : 'hover:bg-[#131318]'}`}
+                      onClick={() => setSelectedIncident(inc)}
+                      className="border-b border-[#1e1e24]/60 hover:bg-[#13131a] cursor-pointer transition-colors"
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-zinc-100">
-                            {formatIncidentId(inc.id)}
-                          </span>
-                          <span className="text-xs text-zinc-400 capitalize">
-                            &bull; {inc.problem_type.replace(/_/g, ' ')}
-                          </span>
+                      <TableCell className="py-3.5 pl-5">
+                        <div className="font-mono text-xs font-bold text-zinc-200 flex items-center gap-2">
+                          <span className="text-indigo-400">{formatIncidentId(inc.id)}</span>
                         </div>
-                        <div className="text-xs text-zinc-400 flex items-center gap-1.5">
+                        <div className="text-xs text-zinc-400 flex items-center gap-1 mt-1 max-w-xs sm:max-w-sm truncate">
                           <MapPin className="w-3 h-3 text-zinc-500 shrink-0" />
-                          <span className="truncate max-w-[210px]">
-                            {inc.address || 'Detected Area'}
+                          <span className="truncate">{inc.address || 'Detected Location'}</span>
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-md bg-[#181822] border border-[#272733] text-[11px] capitalize text-zinc-300">
+                            {inc.category}
+                          </span>
+                          <span className="text-xs font-mono text-zinc-300">
+                            {inc.problem_type.replace(/_/g, ' ')}
                           </span>
                         </div>
-                      </div>
+                      </TableCell>
 
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        {getStatusBadge(inc.status)}
-                        <span className="text-[10px] text-zinc-400 font-mono">
-                          {inc.report_count} signal{inc.report_count > 1 ? 's' : ''}
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-xs font-semibold text-zinc-300">
+                          <Users className="w-3.5 h-3.5 text-blue-400" />
+                          <span>{inc.report_count} citizens</span>
+                        </div>
+                      </TableCell>
+
+                      <TableCell>{getSeverityBadge(inc.severity)}</TableCell>
+
+                      <TableCell>
+                        <span className="text-xs text-zinc-300 font-medium">
+                          {inc.responsible_entity}
                         </span>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+                      </TableCell>
+
+                      <TableCell>
+                        {getSLABadge(inc.created_at, inc.sla_hours, inc.status)}
+                      </TableCell>
+
+                      <TableCell>{getStatusBadge(inc.status)}</TableCell>
+
+                      <TableCell className="text-right pr-5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/40 h-8 gap-1"
+                        >
+                          <span>Inspect</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
-        </div>
-      </section>
+        ) : activePath === 'RELIEF' ? (
+          /* PATH B: EMERGENCY RELIEF DUAL-TRACK CARDS */
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {activePathIncidents.length === 0 ? (
+              <div className="col-span-2 text-center py-16 text-zinc-500 text-xs rounded-2xl bg-[#0e0e12] border border-[#1e1e24]">
+                No active emergency relief incidents.
+              </div>
+            ) : (
+              activePathIncidents.map((inc) => (
+                <div
+                  key={inc.id}
+                  onClick={() => setSelectedIncident(inc)}
+                  className="rounded-2xl bg-[#0e0e12] border border-rose-900/50 hover:border-rose-700/80 p-5 space-y-4 cursor-pointer transition-all shadow-lg shadow-rose-950/10"
+                >
+                  <div className="flex items-center justify-between pb-3 border-b border-[#1e1e24]">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-rose-400 font-bold">
+                        {formatIncidentId(inc.id)}
+                      </span>
+                      <Badge className="bg-rose-600 text-white font-bold text-[10px] uppercase animate-pulse">
+                        CRITICAL RELIEF
+                      </Badge>
+                    </div>
+                    {getSLABadge(inc.created_at, inc.sla_hours, inc.status)}
+                  </div>
+
+                  <div>
+                    <h3 className="text-base font-bold text-white capitalize">
+                      {inc.category.replace(/_/g, ' ')}: {inc.problem_type.replace(/_/g, ' ')}
+                    </h3>
+                    <p className="text-xs text-zinc-400 flex items-center gap-1 mt-1">
+                      <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      {inc.address} &bull; <strong className="text-rose-300 font-medium">{inc.report_count} citizens affected</strong>
+                    </p>
+                  </div>
+
+                  {/* Dual-Track Box */}
+                  <div className="space-y-2.5">
+                    {/* Track 1: Immediate Relief */}
+                    <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/40 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                          Track 1: Immediate Relief Action
+                        </span>
+                        <Badge variant="outline" className="text-[9px] border-rose-700 text-rose-300">
+                          Active Dispatch
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-semibold text-rose-100">
+                        2x 5000L Water Tankers Dispatched &bull; Water Distribution Point Activated
+                      </p>
+                      <p className="text-[11px] text-rose-300/80">
+                        Assigned: Emergency Water Fleet Unit (ETA 45 mins)
+                      </p>
+                    </div>
+
+                    {/* Track 2: Permanent Fix */}
+                    <div className="p-3.5 rounded-xl bg-[#141419] border border-[#272733] space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                          Track 2: Permanent Engineering Repair
+                        </span>
+                        <Badge variant="outline" className="text-[9px] border-zinc-700 text-zinc-300">
+                          Task WO-881
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-medium text-zinc-200">
+                        Mainline 300mm Valve Excavation &amp; Pipe Replacement Task Active
+                      </p>
+                      <p className="text-[11px] text-zinc-400">
+                        Target Resolution SLA: 12 Hours
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-xs text-zinc-400 font-mono">
+                      Status: {inc.status}
+                    </span>
+                    <Button
+                      size="sm"
+                      className="bg-rose-700 hover:bg-rose-600 text-white text-xs h-8 gap-1"
+                    >
+                      <span>Open Emergency Drawer</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        ) : (
+          /* PATH C: STRATEGIC POLICY CARDS */
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {activePathIncidents.length === 0 ? (
+              <div className="col-span-2 text-center py-16 text-zinc-500 text-xs rounded-2xl bg-[#0e0e12] border border-[#1e1e24]">
+                No policy proposals created yet.
+              </div>
+            ) : (
+              activePathIncidents.map((inc) => (
+                <div
+                  key={inc.id}
+                  onClick={() => setSelectedIncident(inc)}
+                  className="rounded-2xl bg-[#0e0e12] border border-emerald-900/40 hover:border-emerald-700/80 p-5 space-y-4 cursor-pointer transition-all shadow-lg shadow-emerald-950/10"
+                >
+                  <div className="flex items-center justify-between pb-3 border-b border-[#1e1e24]">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-emerald-400 font-bold">
+                        {formatIncidentId(inc.id)}
+                      </span>
+                      <Badge className="bg-emerald-700 text-white font-bold text-[10px]">
+                        POLICY SIGNAL
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded-full text-xs font-bold">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>{inc.report_count} Citizen Petitions</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-base font-bold text-white capitalize">
+                      {inc.category.replace(/_/g, ' ')}: {inc.problem_type.replace(/_/g, ' ')}
+                    </h3>
+                    <p className="text-xs text-zinc-400 flex items-center gap-1 mt-1">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      {inc.address}
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#141419] border border-[#272733] space-y-1.5">
+                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      AI Strategic Justification
+                    </span>
+                    <p className="text-xs text-zinc-300 leading-relaxed">
+                      {inc.description}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-xs text-zinc-400 font-mono">
+                      Review Cycle: 30-Day Master Plan
+                    </span>
+                    <Button
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleIncidentAction(inc.id, 'plan_agenda');
+                      }}
+                      disabled={actionLoading}
+                      className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs h-8 gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Add to Master Plan Agenda</span>
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* INCIDENT DETAIL DRAWER (SHEET) */}
+      <Sheet open={!!selectedIncident} onOpenChange={(open) => !open && setSelectedIncident(null)}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-2xl bg-[#0e0e12] border-l border-[#1e1e24] text-zinc-100 p-0 overflow-y-auto flex flex-col justify-between"
+        >
+          {selectedIncident && (
+            <div className="p-6 space-y-6">
+              {/* Drawer Header */}
+              <SheetHeader className="p-0 space-y-3 pb-4 border-b border-[#1e1e24]">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-sm font-bold text-indigo-400">
+                      {formatIncidentId(selectedIncident.id)}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-[#181822] border border-[#272733] text-xs capitalize text-zinc-300">
+                      {selectedIncident.category}
+                    </span>
+                    {getSeverityBadge(selectedIncident.severity)}
+                    {getStatusBadge(selectedIncident.status)}
+                  </div>
+                  <div>
+                    {getSLABadge(selectedIncident.created_at, selectedIncident.sla_hours, selectedIncident.status)}
+                  </div>
+                </div>
+
+                <SheetTitle className="text-lg font-bold text-white capitalize text-left">
+                  {selectedIncident.problem_type.replace(/_/g, ' ')}
+                </SheetTitle>
+
+                <SheetDescription className="text-xs text-zinc-400 flex items-center gap-1.5 text-left">
+                  <MapPin className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                  <span>{selectedIncident.address || 'Address unverified'}</span>
+                  <span>&bull;</span>
+                  <span>Assigned: <strong className="text-zinc-200">{selectedIncident.responsible_entity}</strong></span>
+                </SheetDescription>
+              </SheetHeader>
+
+              {/* 5-Step Closed-Loop Lifecycle Progress */}
+              <div className="p-4 rounded-xl bg-[#121217] border border-[#1e1e24] space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    Closed-Loop Lifecycle Progress
+                  </span>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    {selectedIncident.report_count} Signal{selectedIncident.report_count > 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-5 gap-2 text-center text-xs">
+                  {/* Step 1 */}
+                  <div className="p-2 rounded-lg bg-[#181820] border border-[#272733] text-zinc-200">
+                    <CheckCircle2 className="w-4 h-4 mx-auto mb-1 text-blue-400" />
+                    <p className="font-bold text-[10px]">1. Reported</p>
+                    <p className="text-[9px] text-zinc-400">Citizen Ingest</p>
+                  </div>
+
+                  {/* Step 2 */}
+                  <div className="p-2 rounded-lg bg-[#181820] border border-[#272733] text-zinc-200">
+                    <Sparkles className="w-4 h-4 mx-auto mb-1 text-purple-400" />
+                    <p className="font-bold text-[10px]">2. AI Triage</p>
+                    <p className="text-[9px] text-zinc-400">Gemini 2.5</p>
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="p-2 rounded-lg bg-[#181820] border border-[#272733] text-zinc-200">
+                    <Briefcase className="w-4 h-4 mx-auto mb-1 text-amber-400" />
+                    <p className="font-bold text-[10px]">3. Dispatched</p>
+                    <p className="text-[9px] text-zinc-400">{selectedIncident.sla_hours}h SLA</p>
+                  </div>
+
+                  {/* Step 4 */}
+                  <div className={`p-2 rounded-lg border ${selectedIncident.work_orders.some((w) => w.status === 'COMPLETED') ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-[#181820] border-[#272733] text-zinc-400'}`}>
+                    <FileCheck className="w-4 h-4 mx-auto mb-1" />
+                    <p className="font-bold text-[10px]">4. Completed</p>
+                    <p className="text-[9px]">{selectedIncident.work_orders.some((w) => w.status === 'COMPLETED') ? 'Evidence Done' : 'In Progress'}</p>
+                  </div>
+
+                  {/* Step 5 */}
+                  <div className={`p-2 rounded-lg border ${selectedIncident.status === 'RESOLVED' ? 'bg-emerald-950/70 border-emerald-600 text-emerald-300' : selectedIncident.status === 'REOPENED' ? 'bg-rose-950/70 border-rose-600 text-rose-300' : 'bg-[#181820] border-[#272733] text-zinc-400'}`}>
+                    <RotateCcw className="w-4 h-4 mx-auto mb-1" />
+                    <p className="font-bold text-[10px]">5. Verified</p>
+                    <p className="text-[9px]">{selectedIncident.status === 'RESOLVED' ? 'Citizen Verified' : selectedIncident.status === 'REOPENED' ? 'Escalated' : 'Awaiting Reply'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Operational Summary Description */}
+              <div className="p-4 rounded-xl bg-[#141419] border border-[#272733] text-xs text-zinc-300 leading-relaxed space-y-1">
+                <span className="font-semibold text-zinc-400 block">Operational Summary:</span>
+                <p>{selectedIncident.description}</p>
+              </div>
+
+              {/* Visual Evidence View (Before vs After) */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block">
+                  Visual Evidence Verification (Before vs After)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Before Photo */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-rose-400 font-semibold flex items-center gap-1 text-[11px]">
+                        <AlertTriangle className="w-3 h-3" /> Citizen Report Photo
+                      </span>
+                      <span className="text-zinc-500 font-mono text-[10px]">BEFORE</span>
+                    </div>
+                    <div className="aspect-video w-full rounded-xl overflow-hidden border border-[#272733] bg-[#09090c] relative">
+                      {selectedIncident.reports[0]?.image_url ? (
+                        <img
+                          src={selectedIncident.reports[0].image_url}
+                          alt="Before report evidence"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-zinc-600 text-xs">
+                          No initial photo attached
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* After Photo */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+                        <CheckCircle2 className="w-3 h-3" /> Field Completion Proof
+                      </span>
+                      <span className="text-zinc-500 font-mono text-[10px]">AFTER</span>
+                    </div>
+                    <div className="aspect-video w-full rounded-xl overflow-hidden border border-[#272733] bg-[#09090c] relative">
+                      {selectedIncident.work_orders.find((w) => w.evidence_image_url)?.evidence_image_url ? (
+                        <img
+                          src={selectedIncident.work_orders.find((w) => w.evidence_image_url)!.evidence_image_url!}
+                          alt="After repair evidence"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-xs p-3 text-center">
+                          <span className="font-semibold text-zinc-400">Work in Progress</span>
+                          <span className="text-[10px] text-zinc-600 mt-0.5">Crew has not uploaded proof photo</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Trigger Panels */}
+              <div className="space-y-3 pt-2">
+                {/* 1. Field Worker Portal */}
+                <div className="p-4 rounded-xl bg-[#141419] border border-[#272733] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Wrench className="w-3.5 h-3.5 text-indigo-400" />
+                      Field Worker Portal
+                    </span>
+                    <Badge variant="outline" className="text-[9px]">Crew Action</Badge>
+                  </div>
+                  <p className="text-xs text-zinc-400">
+                    Simulate field technician repairing the issue, uploading completion proof, and marking task completed.
+                  </p>
+                  <Button
+                    onClick={() => handleIncidentAction(selectedIncident.id, 'complete_work')}
+                    disabled={actionLoading}
+                    className="w-full bg-[#22222b] hover:bg-[#2b2b36] border border-[#333342] text-zinc-100 text-xs font-semibold h-9 gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    Upload Completion Evidence &amp; Mark Done
+                  </Button>
+                </div>
+
+                {/* 2. Citizen WhatsApp Confirmation */}
+                <div className="p-4 rounded-xl bg-[#141419] border border-[#272733] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5" />
+                      Citizen WhatsApp Confirmation
+                    </span>
+                    <Badge variant="outline" className="text-[9px] border-emerald-800 text-emerald-300">
+                      Closed Loop
+                    </Badge>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-[11px] text-emerald-100 space-y-1 font-sans">
+                    <p className="font-semibold text-emerald-300">WhatsApp Notification sent to Citizen:</p>
+                    <p className="italic text-zinc-300 bg-[#09090c] p-2 rounded border border-[#272733]">
+                      &ldquo;Municipal team has completed repair on {formatIncidentId(selectedIncident.id)}. Did this satisfactorily resolve the issue? Reply YES or NO.&rdquo;
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => handleIncidentAction(selectedIncident.id, 'verify_citizen', { response: 'YES' })}
+                      disabled={actionLoading}
+                      className="flex-1 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-300 text-xs font-semibold h-8 gap-1"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Simulate Reply YES (Resolve)
+                    </Button>
+
+                    <Button
+                      onClick={() => handleIncidentAction(selectedIncident.id, 'verify_citizen', { response: 'NO' })}
+                      disabled={actionLoading}
+                      className="flex-1 bg-rose-950/70 hover:bg-rose-900 border border-rose-700/80 text-rose-300 text-xs font-semibold h-8 gap-1"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Simulate Reply NO (Reopen)
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <SheetFooter className="p-4 border-t border-[#1e1e24] bg-[#0e0e12] flex items-center justify-between">
+            <span className="text-[11px] text-zinc-500 font-mono">
+              Created: {selectedIncident ? new Date(selectedIncident.created_at).toLocaleString() : ''}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedIncident(null)}
+              className="border-[#272733] bg-[#141419] text-zinc-300 text-xs"
+            >
+              Close Drawer
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* LIVE WHATSAPP SIMULATOR MODAL */}
       <Dialog open={simulatorOpen} onOpenChange={setSimulatorOpen}>

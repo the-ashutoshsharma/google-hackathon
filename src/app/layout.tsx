@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Civic Action & Resolution System",
-  description: "AI-powered civic complaint intelligence and deterministic municipal resolution dispatch",
+  title: "Civic Action & Resolution Platform",
+  description: "Enterprise Municipal Operations & Closed-Loop Civic Action Dispatch",
 };
 
 export default function RootLayout({
@@ -15,8 +15,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="font-sans antialiased bg-slate-50 text-slate-900 min-h-screen">
+    <html lang="en" className={`dark ${inter.variable}`}>
+      <body className="font-sans antialiased bg-[#070709] text-zinc-100 min-h-screen">
         {children}
       </body>
     </html>
