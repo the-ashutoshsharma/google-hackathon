@@ -1,29 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import twilio from 'twilio';
 import { processNewReport } from '@/lib/routing';
 
-// Helper to construct Twilio REST client safely
-function getTwilioClient() {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  if (accountSid && authToken && !accountSid.startsWith('ACXXXX')) {
-    return twilio(accountSid, authToken);
-  }
-  return null;
-}
-
 /**
- * Generates standard TwiML XML response string
+ * Escapes XML special characters to guarantee valid TwiML payload
  */
-function buildTwiMLResponse(message: string): string {
-  const sanitized = message
+function escapeXml(unsafe: string): string {
+  return unsafe
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
 
+/**
+ * Generates standard synchronous TwiML XML response string
+ */
+function buildTwiMLResponse(message: string): string {
+  const sanitized = escapeXml(message);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Message>${sanitized}</Message>
@@ -34,7 +28,6 @@ export async function POST(req: NextRequest) {
   try {
     let from = '';
     let body = '';
-    let to = '';
     let mediaUrl: string | undefined = undefined;
     let lat: number | undefined = undefined;
     let lng: number | undefined = undefined;
@@ -49,7 +42,6 @@ export async function POST(req: NextRequest) {
       const formData = await req.formData();
       from = (formData.get('From') as string) || '';
       body = (formData.get('Body') as string) || '';
-      to = (formData.get('To') as string) || '';
       mediaUrl = (formData.get('MediaUrl0') as string) || undefined;
 
       const latStr = formData.get('Latitude') as string;
@@ -64,7 +56,6 @@ export async function POST(req: NextRequest) {
       const json = await req.json();
       from = json.From || json.from || '';
       body = json.Body || json.body || '';
-      to = json.To || json.to || '';
       mediaUrl = json.MediaUrl0 || json.mediaUrl || undefined;
       if (json.Latitude && json.Longitude) {
         lat = parseFloat(json.Latitude);
@@ -85,7 +76,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Process the civic report via the intelligent deterministic pipeline
+    // Process the civic report via the intelligent deterministic pipeline (Gemini 2.5 Flash + Supabase)
     const locationData = lat && lng ? { lat, lng, address } : address ? { address } : undefined;
     const result = await processNewReport(from, body.trim(), locationData, mediaUrl);
 
@@ -118,21 +109,7 @@ export async function POST(req: NextRequest) {
         `Your submission has boosted the incident priority score.`;
     }
 
-    // If Twilio client credentials are configured, dispatch via REST API
-    const twilioClient = getTwilioClient();
-    if (twilioClient && to) {
-      try {
-        await twilioClient.messages.create({
-          body: replyText,
-          from: to,
-          to: from,
-        });
-      } catch (twilioErr) {
-        console.warn('Twilio REST message send warning (falling back to TwiML):', twilioErr);
-      }
-    }
-
-    // Always return valid TwiML XML
+    // Return synchronous TwiML XML response (No ContentSid/Template requirement)
     return new NextResponse(buildTwiMLResponse(replyText), {
       status: 200,
       headers: { 'Content-Type': 'text/xml; charset=utf-8' },
