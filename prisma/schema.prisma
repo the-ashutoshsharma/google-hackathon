@@ -1,0 +1,100 @@
+// Prisma Schema for Civic Action & Resolution System
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+enum WorkflowRoute {
+  FIX
+  RELIEF
+  PLAN
+}
+
+enum IncidentStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  REOPENED
+}
+
+enum SeverityLevel {
+  low
+  medium
+  high
+  critical
+}
+
+enum WorkOrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Citizen {
+  id           String          @id @default(cuid())
+  phone_number String          @unique
+  created_at   DateTime        @default(now())
+  reports      CitizenReport[]
+
+  @@map("citizens")
+}
+
+model CivicIncident {
+  id                 String          @id @default(cuid())
+  category           String
+  problem_type       String
+  workflow_route     WorkflowRoute   @default(FIX)
+  description        String
+  severity           SeverityLevel   @default(medium)
+  status             IncidentStatus  @default(OPEN)
+  lat                Float?
+  lng                Float?
+  address            String?
+  report_count       Int             @default(1)
+  responsible_entity String
+  sla_hours          Int
+  created_at         DateTime        @default(now())
+  updated_at         DateTime        @updatedAt
+  reports            CitizenReport[]
+  work_orders        WorkOrder[]
+
+  @@index([status, problem_type])
+  @@index([category])
+  @@map("civic_incidents")
+}
+
+model CitizenReport {
+  id           String        @id @default(cuid())
+  citizen_id   String
+  incident_id  String
+  text_payload String
+  image_url    String?
+  created_at   DateTime      @default(now())
+  citizen      Citizen       @relation(fields: [citizen_id], references: [id], onDelete: Cascade)
+  incident     CivicIncident @relation(fields: [incident_id], references: [id], onDelete: Cascade)
+
+  @@index([citizen_id])
+  @@index([incident_id])
+  @@map("citizen_reports")
+}
+
+model WorkOrder {
+  id                 String          @id @default(cuid())
+  incident_id        String
+  assigned_to        String
+  status             WorkOrderStatus @default(PENDING)
+  evidence_image_url String?
+  created_at         DateTime        @default(now())
+  completed_at       DateTime?
+  incident           CivicIncident   @relation(fields: [incident_id], references: [id], onDelete: Cascade)
+
+  @@index([incident_id])
+  @@index([status])
+  @@map("work_orders")
+}
