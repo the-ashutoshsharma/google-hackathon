@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
     const locationData = lat && lng ? { lat, lng, address } : address ? { address } : undefined;
     const result = await processNewReport(from, body.trim(), locationData, mediaUrl);
 
-    const { incident, isNewIncident, analysis } = result;
+    const { incident, isNewIncident } = result;
 
     // Build the citizen response message
     let replyText = '';
@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
       status: 200,
       headers: { 'Content-Type': 'text/xml; charset=utf-8' },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error processing Twilio webhook:', error);
 
     const errorReply =

@@ -1,6 +1,14 @@
 import { prisma } from './prisma';
 import { analyzeCitizenReport, CitizenReportAnalysis } from './gemini';
-import { WorkflowRoute, SeverityLevel, IncidentStatus, WorkOrderStatus } from '@/generated/prisma/client';
+import {
+  CivicIncident,
+  CitizenReport,
+  WorkOrder,
+  WorkflowRoute,
+  SeverityLevel,
+  IncidentStatus,
+  WorkOrderStatus,
+} from '@/generated/prisma/client';
 
 export interface RouteRule {
   responsible_entity: string;
@@ -102,9 +110,9 @@ export interface ProcessReportLocation {
 
 export interface ProcessReportResult {
   isNewIncident: boolean;
-  incident: any;
-  citizenReport: any;
-  workOrder?: any | null;
+  incident: CivicIncident;
+  citizenReport: CitizenReport;
+  workOrder?: WorkOrder | null;
   analysis: CitizenReportAnalysis;
 }
 
@@ -213,7 +221,7 @@ export async function processNewReport(
   });
 
   // 5. For FIX workflows, generate a WorkOrder
-  let workOrder = null;
+  let workOrder: WorkOrder | null = null;
   if (analysis.workflow_route === 'FIX') {
     workOrder = await prisma.workOrder.create({
       data: {
